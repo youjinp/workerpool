@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-    wp := workerpool.New(2)
+    wp := workerpool.New(context.TODO(), 2)
     requests := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
 
     for _, r := range requests {
