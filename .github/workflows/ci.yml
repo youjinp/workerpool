@@ -1,0 +1,15 @@
+name: ci
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      # checkout repo
+      - uses: actions/checkout@v2
+
+      # run unit tests
+      - run: make race
