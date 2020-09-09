@@ -29,6 +29,7 @@ func main() {
         r := r
         wp.Submit(func() error {
             fmt.Println("Handling request:", r)
+            return nil
         })
     }
 
