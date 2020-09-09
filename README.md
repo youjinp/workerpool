@@ -17,20 +17,20 @@ Changes made:
 package main
 
 import (
-	"fmt"
-	"github.com/youjinp/workerpool"
+    "fmt"
+    "github.com/youjinp/workerpool"
 )
 
 func main() {
-	wp := workerpool.New(2)
-	requests := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+    wp := workerpool.New(2)
+    requests := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
 
-	for _, r := range requests {
-		r := r
-		wp.Submit(func() error {
-			fmt.Println("Handling request:", r)
-		})
-	}
+    for _, r := range requests {
+        r := r
+        wp.Submit(func() error {
+            fmt.Println("Handling request:", r)
+        })
+    }
 
     if err := wp.Wait(); err != nil {
         log.Fatal(err)
