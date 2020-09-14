@@ -49,7 +49,7 @@ func New(ctx context.Context, maxWorkers int) *WorkerPool {
 	}
 
 	// Start the task dispatcher.
-	go pool.dispatch(ctx)
+	go pool.dispatch()
 
 	return pool
 }

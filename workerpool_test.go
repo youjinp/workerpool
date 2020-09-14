@@ -159,3 +159,66 @@ func TestWorkerTimeout(t *testing.T) {
 		t.Fatal("Second worker did not timeout")
 	}
 }
+
+func TestResubmit(t *testing.T) {
+
+	// create pool
+	wp := New(context.TODO(), 2)
+	requests := []string{"1", "2", "3", "4", "5"}
+
+	// create response channel
+	rspChan := make(chan string)
+
+	// create sync group
+	// waits for all tasks to finish before closing task channel
+	var wg sync.WaitGroup
+
+	// submit tasks
+	for _, r := range requests {
+		// increment wait group
+		wg.Add(1)
+
+		// capture
+		r := r
+
+		// submit task
+		wp.Submit(func() error {
+
+			// decrement wait group when done
+			defer wg.Done()
+			time.Sleep(time.Millisecond)
+			rspChan <- r
+
+			// increment wait group for nested task
+			wg.Add(1)
+			wp.Submit(func() error {
+
+				// decrement wait group when done
+				defer wg.Done()
+				rspChan <- r
+				return nil
+			})
+			return nil
+		})
+	}
+
+	// receive responses
+	go func() {
+		for {
+			select {
+			case _, ok := <-rspChan:
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
+
+	// wait for all tasks to be done
+	wg.Wait()
+
+	// close
+	err := wp.Wait()
+	assert.Nil(t, err)
+	close(rspChan)
+}

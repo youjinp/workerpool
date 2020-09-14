@@ -1,19 +1,18 @@
 package workerpool
 
 import (
-	"context"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
-func (p *WorkerPool) dispatch(ctx context.Context) {
+func (p *WorkerPool) dispatch() {
 
 	timeout := time.NewTimer(idleTimeout)
 	var workerCount int
 	var idle bool
-	g, ctx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(p.context)
 
 Loop:
 	for {
@@ -139,6 +138,7 @@ func (p *WorkerPool) startWorker(errGroup *errgroup.Group, task func() error, wo
 func (p *WorkerPool) worker(workerQueue chan func() error) error {
 	for task := range workerQueue {
 		if task == nil {
+			log.Trace().Msg("worker: got kill order")
 			return nil
 		}
 		log.Trace().Msg("worker: Got task, performing task")
