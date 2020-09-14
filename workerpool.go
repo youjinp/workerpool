@@ -2,10 +2,11 @@ package workerpool
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gammazero/deque"
-	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -16,6 +17,8 @@ const (
 // WorkerPool is a collection of goroutines, where the number of concurrent
 // goroutines processing requests does not exceed the specified maximum.
 type WorkerPool struct {
+	waitgroup    *sync.WaitGroup
+	errgroup     *errgroup.Group
 	maxWorkers   int
 	taskQueue    chan func() error
 	workerQueue  chan func() error
@@ -23,7 +26,6 @@ type WorkerPool struct {
 	doneChan     chan struct{}
 	waitingQueue deque.Deque
 	context      context.Context
-	wait         chan bool
 }
 
 // New creates and starts a pool of worker goroutines.
@@ -38,14 +40,18 @@ func New(ctx context.Context, maxWorkers int) *WorkerPool {
 		maxWorkers = 1
 	}
 
+	// error group
+	g, ctx := errgroup.WithContext(ctx)
+
 	pool := &WorkerPool{
+		waitgroup:   &sync.WaitGroup{},
+		errgroup:    g,
 		maxWorkers:  maxWorkers,
 		taskQueue:   make(chan func() error),
 		workerQueue: make(chan func() error),
 		errChan:     make(chan error),
 		doneChan:    make(chan struct{}),
 		context:     ctx,
-		wait:        make(chan bool),
 	}
 
 	// Start the task dispatcher.
@@ -74,6 +80,7 @@ func New(ctx context.Context, maxWorkers int) *WorkerPool {
 // goroutines is not significant, there is no need to retain idle workers
 // indefinitely.
 func (p *WorkerPool) Submit(task func() error) {
+	p.waitgroup.Add(1)
 	if task != nil {
 		select {
 		case <-p.context.Done():
@@ -89,22 +96,44 @@ func (p *WorkerPool) Submit(task func() error) {
 // Since creating the worker pool starts at least one goroutine, for the
 // dispatcher, Stop() or Wait() should be called when the worker pool is no
 // longer needed.
-func (p *WorkerPool) Stop() {
-	go func() {
-		log.Trace().Msg("workerpool: pushing don't wait")
-		p.wait <- false
-	}()
+func (p *WorkerPool) Stop() error {
+	// close task queue
 	close(p.taskQueue)
+
+	// receive error (if any) from dispatch
+	select {
+	case err, ok := <-p.errChan:
+		// return received error
+		if ok {
+			return err
+		}
+		// no error
+	case <-p.doneChan:
+	}
+
+	return nil
 }
 
 // Wait stops the worker pool and waits for a signal from either the done
 // channel or the error channel.
 func (p *WorkerPool) Wait() error {
+
+	waitChan := make(chan bool)
 	go func() {
-		log.Trace().Msg("workerpool: pushing wait")
-		p.wait <- true
+		p.waitgroup.Wait()
+		close(waitChan)
 	}()
+
+	// wait until all tasks finished, or received done from context
+	select {
+	case <-waitChan:
+	case <-p.context.Done():
+	}
+
+	// cloase task queue
 	close(p.taskQueue)
+
+	// receive error (if any) from dispatch
 	select {
 	case err, ok := <-p.errChan:
 		// return received error

@@ -12,7 +12,6 @@ func (p *WorkerPool) dispatch() {
 	timeout := time.NewTimer(idleTimeout)
 	var workerCount int
 	var idle bool
-	g, ctx := errgroup.WithContext(p.context)
 
 Loop:
 	for {
@@ -22,7 +21,7 @@ Loop:
 			log.Trace().Msg("dispatch: waiting queue not empty")
 			select {
 			// Received done from context, break
-			case <-ctx.Done():
+			case <-p.context.Done():
 				log.Trace().Msg("dispatch: received done from context")
 				break Loop
 			// Received task from queue
@@ -44,7 +43,7 @@ Loop:
 		log.Trace().Msg("dispatch: waiting queue empty")
 		select {
 		// Received done from context, break
-		case <-ctx.Done():
+		case <-p.context.Done():
 			log.Trace().Msg("dispatch: received done from context")
 			break Loop
 		// Received task from queue
@@ -63,7 +62,7 @@ Loop:
 				// Create a new worker, if not at max.
 				if workerCount < p.maxWorkers {
 					log.Trace().Msg("dispatch: creating a new worker")
-					g.Go(func() error { return p.startWorker(g, task, p.workerQueue) })
+					p.errgroup.Go(func() error { return p.startWorker(p.errgroup, task, p.workerQueue) })
 					workerCount++
 				} else {
 					log.Trace().Msg("dispatch: pushing task into waiting queue")
@@ -86,31 +85,9 @@ Loop:
 		}
 	}
 
-	// Block until decision to wait has been made
-	// If instructed to wait, then run tasks that are already queued.
-	log.Trace().Msg("dispatch: waiting for decision to wait")
-	wait := <-p.wait
-	if wait {
-		// removes each task from the waiting queue and gives it to
-		// workers until queue is empty.
-	WaitingQueueLoop:
-		for p.waitingQueue.Len() != 0 {
-			log.Trace().Msg("dispatch: draining waiting queue")
-			select {
-			case <-ctx.Done():
-				log.Trace().Msg("dispatch: received done from context")
-				break WaitingQueueLoop
-			case p.workerQueue <- p.waitingQueue.Front().(func() error):
-				// A worker is ready, so give task to worker.
-				log.Trace().Msg("dispatch: transferring from waitingQ to workerQ")
-				p.waitingQueue.PopFront()
-			}
-		}
-	}
-
 	log.Trace().Msg("dispatch: done")
 	close(p.workerQueue)
-	if err := g.Wait(); err != nil {
+	if err := p.errgroup.Wait(); err != nil {
 		p.errChan <- err
 		close(p.errChan)
 	} else {
@@ -122,6 +99,9 @@ Loop:
 
 // startWorker runs initial task, then starts a worker waiting for more.
 func (p *WorkerPool) startWorker(errGroup *errgroup.Group, task func() error, workerQueue chan func() error) error {
+
+	defer p.waitgroup.Done()
+
 	log.Trace().Msg("worker (startWorker): Performing task")
 	if err := task(); err != nil {
 		log.Trace().Msg("worker (startWorker): got error")
@@ -131,6 +111,7 @@ func (p *WorkerPool) startWorker(errGroup *errgroup.Group, task func() error, wo
 	errGroup.Go(func() error {
 		return p.worker(workerQueue)
 	})
+
 	return nil
 }
 
@@ -141,11 +122,14 @@ func (p *WorkerPool) worker(workerQueue chan func() error) error {
 			log.Trace().Msg("worker: got kill order")
 			return nil
 		}
+
 		log.Trace().Msg("worker: Got task, performing task")
 		if err := task(); err != nil {
 			log.Trace().Msg("worker: got error")
 			return err
 		}
+
+		p.waitgroup.Done()
 	}
 	return nil
 }
