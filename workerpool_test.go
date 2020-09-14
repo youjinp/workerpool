@@ -69,6 +69,7 @@ func TestErrorPropagated(t *testing.T) {
 
 	err := wp.Wait()
 	assert.NotNil(t, err)
+	assert.Equal(t, err, errors.New("someerror"))
 }
 
 func TestContextCancel(t *testing.T) {
@@ -167,34 +168,20 @@ func TestResubmit(t *testing.T) {
 	requests := []string{"1", "2", "3", "4", "5"}
 
 	// create response channel
-	rspChan := make(chan string)
-
-	// create sync group
-	// waits for all tasks to finish before closing task channel
-	var wg sync.WaitGroup
+	rspChan := make(chan string, 10)
 
 	// submit tasks
 	for _, r := range requests {
-		// increment wait group
-		wg.Add(1)
-
 		// capture
 		r := r
 
 		// submit task
 		wp.Submit(func() error {
 
-			// decrement wait group when done
-			defer wg.Done()
 			time.Sleep(time.Millisecond)
 			rspChan <- r
 
-			// increment wait group for nested task
-			wg.Add(1)
 			wp.Submit(func() error {
-
-				// decrement wait group when done
-				defer wg.Done()
 				rspChan <- r
 				return nil
 			})
@@ -202,23 +189,15 @@ func TestResubmit(t *testing.T) {
 		})
 	}
 
-	// receive responses
-	go func() {
-		for {
-			select {
-			case _, ok := <-rspChan:
-				if !ok {
-					return
-				}
-			}
-		}
-	}()
-
-	// wait for all tasks to be done
-	wg.Wait()
-
 	// close
 	err := wp.Wait()
 	assert.Nil(t, err)
 	close(rspChan)
+
+	rspArray := []string{}
+	for rsp := range rspChan {
+		rspArray = append(rspArray, rsp)
+	}
+
+	assert.Equal(t, 10, len(rspArray))
 }
