@@ -10,8 +10,6 @@ import (
 func (p *WorkerPool) dispatch() {
 
 	timeout := time.NewTimer(idleTimeout)
-	var workerCount int
-	var idle bool
 
 Loop:
 	for {
@@ -62,49 +60,28 @@ Loop:
 				log.Trace().Msg("dispatch: push task into worker queue")
 			default:
 				// Create a new worker, if not at max.
-				if workerCount < p.maxWorkers {
+				if p.workerCount < p.maxWorkers {
 					log.Trace().Msg("dispatch: creating a new worker")
 					p.errgroup.Go(func() error { return p.startWorker(p.errgroup, task, p.workerQueue) })
-					workerCount++
+					p.workerCount++
 				} else {
 					log.Trace().Msg("dispatch: pushing task into waiting queue")
 					// Enqueue task to be executed by next available worker.
 					p.waitingQueue.PushBack(task)
 				}
 			}
-			idle = false
+			p.idle = false
 
-		// Received blockingTask from queue
-		case task, ok := <-p.blockingTaskQueue:
-			if !ok {
-				log.Trace().Msg("dispatch: blocking task queue closed")
-				break Loop
-			}
-			log.Trace().Msg("dispatch: got a blocking task")
-
-			// Got a task to do.
-			// Create a new worker, if not at max.
-			if workerCount < p.maxWorkers {
-				log.Trace().Msg("dispatch: creating a new worker")
-				p.errgroup.Go(func() error { return p.startWorker(p.errgroup, task, p.workerQueue) })
-				workerCount++
-			} else { // wait for ready worker
-				p.workerQueue <- task
-				log.Trace().Msg("dispatch: push blocking task into worker queue")
-			}
-
-			idle = false
-
+		// Timed out waiting for work to arrive.  Kill a ready worker if
+		// pool has been idle for a whole timeout.
 		case <-timeout.C:
-			// Timed out waiting for work to arrive.  Kill a ready worker if
-			// pool has been idle for a whole timeout.
 			log.Trace().Msg("dispatch: timed out")
-			if idle && workerCount > 0 {
+			if p.idle && p.workerCount > 0 {
 				if p.killIdleWorker() {
-					workerCount--
+					p.workerCount--
 				}
 			}
-			idle = true
+			p.idle = true
 			timeout.Reset(idleTimeout)
 		}
 	}
