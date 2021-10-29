@@ -59,10 +59,13 @@ func TestSubmitWait(t *testing.T) {
 	rspChan := make(chan string)
 
 	// listen to responses
+	mapMutex := sync.Mutex{}
 	rspMap := map[string]bool{}
 	go func() {
 		for rsp := range rspChan {
+			mapMutex.Lock()
 			rspMap[rsp] = true
+			mapMutex.Unlock()
 		}
 	}()
 
@@ -81,12 +84,14 @@ func TestSubmitWait(t *testing.T) {
 	assert.Nil(t, err)
 	close(rspChan)
 
+	mapMutex.Lock()
 	assert.Equal(t, len(requests), len(rspMap), "did not handle all requests")
 	for _, req := range requests {
 		if _, ok := rspMap[req]; !ok {
 			t.Fatal("Missing expected value: ", req)
 		}
 	}
+	mapMutex.Unlock()
 }
 
 func TestErrorPropagated(t *testing.T) {
