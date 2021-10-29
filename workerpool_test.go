@@ -61,17 +61,21 @@ func TestSubmitWait(t *testing.T) {
 	// listen to responses
 	mapMutex := sync.Mutex{}
 	rspMap := map[string]bool{}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
 		for rsp := range rspChan {
 			mapMutex.Lock()
 			rspMap[rsp] = true
 			mapMutex.Unlock()
 		}
+		wg.Done()
 	}()
 
 	// submit tasks
 	for _, r := range requests {
 		r := r
+
 		wp.SubmitWait(func() error {
 			time.Sleep(time.Millisecond)
 			rspChan <- r
@@ -83,6 +87,7 @@ func TestSubmitWait(t *testing.T) {
 	err := wp.Wait()
 	assert.Nil(t, err)
 	close(rspChan)
+	wg.Wait()
 
 	mapMutex.Lock()
 	assert.Equal(t, len(requests), len(rspMap), "did not handle all requests")

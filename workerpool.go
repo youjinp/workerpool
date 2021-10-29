@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gammazero/deque"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -26,6 +27,8 @@ type WorkerPool struct {
 	errChan           chan error
 	doneChan          chan struct{}
 	waitingQueue      deque.Deque
+	workerCount       int
+	idle              bool
 	context           context.Context
 }
 
@@ -54,6 +57,8 @@ func New(ctx context.Context, maxWorkers int) *WorkerPool {
 		errChan:           make(chan error),
 		doneChan:          make(chan struct{}),
 		waitingQueue:      deque.Deque{},
+		workerCount:       0,
+		idle:              false,
 		context:           ctx,
 	}
 
@@ -94,12 +99,24 @@ func (p *WorkerPool) Submit(task func() error) {
 
 func (p *WorkerPool) SubmitWait(task func() error) {
 	p.waitgroup.Add(1)
-	if task != nil {
+
+	if task == nil {
+		return
+	}
+
+	// create a worker if not at max
+	if p.workerCount < p.maxWorkers {
+		log.Trace().Msg("submitwait: creating a new worker")
+		p.errgroup.Go(func() error { return p.startWorker(p.errgroup, task, p.workerQueue) })
+		p.workerCount++
+	} else { // wait for ready worker
 		select {
 		case <-p.context.Done():
-		case p.blockingTaskQueue <- task:
+		case p.workerQueue <- task:
 		}
 	}
+
+	p.idle = false
 }
 
 // Stop stops the worker pool and waits for only currently running tasks to
