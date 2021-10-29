@@ -17,15 +17,16 @@ const (
 // WorkerPool is a collection of goroutines, where the number of concurrent
 // goroutines processing requests does not exceed the specified maximum.
 type WorkerPool struct {
-	waitgroup    *sync.WaitGroup
-	errgroup     *errgroup.Group
-	maxWorkers   int
-	taskQueue    chan func() error
-	workerQueue  chan func() error
-	errChan      chan error
-	doneChan     chan struct{}
-	waitingQueue deque.Deque
-	context      context.Context
+	waitgroup         *sync.WaitGroup
+	errgroup          *errgroup.Group
+	maxWorkers        int
+	taskQueue         chan func() error
+	blockingTaskQueue chan func() error
+	workerQueue       chan func() error
+	errChan           chan error
+	doneChan          chan struct{}
+	waitingQueue      deque.Deque
+	context           context.Context
 }
 
 // New creates and starts a pool of worker goroutines.
@@ -44,14 +45,16 @@ func New(ctx context.Context, maxWorkers int) *WorkerPool {
 	g, ctx := errgroup.WithContext(ctx)
 
 	pool := &WorkerPool{
-		waitgroup:   &sync.WaitGroup{},
-		errgroup:    g,
-		maxWorkers:  maxWorkers,
-		taskQueue:   make(chan func() error),
-		workerQueue: make(chan func() error),
-		errChan:     make(chan error),
-		doneChan:    make(chan struct{}),
-		context:     ctx,
+		waitgroup:         &sync.WaitGroup{},
+		errgroup:          g,
+		maxWorkers:        maxWorkers,
+		taskQueue:         make(chan func() error),
+		blockingTaskQueue: make(chan func() error),
+		workerQueue:       make(chan func() error),
+		errChan:           make(chan error),
+		doneChan:          make(chan struct{}),
+		waitingQueue:      deque.Deque{},
+		context:           ctx,
 	}
 
 	// Start the task dispatcher.
@@ -85,6 +88,16 @@ func (p *WorkerPool) Submit(task func() error) {
 		select {
 		case <-p.context.Done():
 		case p.taskQueue <- task:
+		}
+	}
+}
+
+func (p *WorkerPool) SubmitWait(task func() error) {
+	p.waitgroup.Add(1)
+	if task != nil {
+		select {
+		case <-p.context.Done():
+		case p.blockingTaskQueue <- task:
 		}
 	}
 }
@@ -130,7 +143,7 @@ func (p *WorkerPool) Wait() error {
 	case <-p.context.Done():
 	}
 
-	// cloase task queue
+	// close task queue
 	close(p.taskQueue)
 
 	// receive error (if any) from dispatch

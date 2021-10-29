@@ -42,10 +42,12 @@ Loop:
 
 		log.Trace().Msg("dispatch: waiting queue empty")
 		select {
+
 		// Received done from context, break
 		case <-p.context.Done():
 			log.Trace().Msg("dispatch: received done from context")
 			break Loop
+
 		// Received task from queue
 		case task, ok := <-p.taskQueue:
 			if !ok {
@@ -71,6 +73,28 @@ Loop:
 				}
 			}
 			idle = false
+
+		// Received blockingTask from queue
+		case task, ok := <-p.blockingTaskQueue:
+			if !ok {
+				log.Trace().Msg("dispatch: blocking task queue closed")
+				break Loop
+			}
+			log.Trace().Msg("dispatch: got a blocking task")
+
+			// Got a task to do.
+			// Create a new worker, if not at max.
+			if workerCount < p.maxWorkers {
+				log.Trace().Msg("dispatch: creating a new worker")
+				p.errgroup.Go(func() error { return p.startWorker(p.errgroup, task, p.workerQueue) })
+				workerCount++
+			} else { // wait for ready worker
+				p.workerQueue <- task
+				log.Trace().Msg("dispatch: push blocking task into worker queue")
+			}
+
+			idle = false
+
 		case <-timeout.C:
 			// Timed out waiting for work to arrive.  Kill a ready worker if
 			// pool has been idle for a whole timeout.

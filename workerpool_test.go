@@ -51,6 +51,44 @@ func TestExample(t *testing.T) {
 	}
 }
 
+func TestSubmitWait(t *testing.T) {
+
+	wp := New(context.TODO(), 2)
+	requests := []string{"1", "2", "3", "4", "5", "6", "7"}
+
+	rspChan := make(chan string)
+
+	// listen to responses
+	rspMap := map[string]bool{}
+	go func() {
+		for rsp := range rspChan {
+			rspMap[rsp] = true
+		}
+	}()
+
+	// submit tasks
+	for _, r := range requests {
+		r := r
+		wp.SubmitWait(func() error {
+			time.Sleep(time.Millisecond)
+			rspChan <- r
+			return nil
+		})
+	}
+
+	// wait on remaining tasks
+	err := wp.Wait()
+	assert.Nil(t, err)
+	close(rspChan)
+
+	assert.Equal(t, len(requests), len(rspMap), "did not handle all requests")
+	for _, req := range requests {
+		if _, ok := rspMap[req]; !ok {
+			t.Fatal("Missing expected value: ", req)
+		}
+	}
+}
+
 func TestErrorPropagated(t *testing.T) {
 	// t.Parallel()
 
